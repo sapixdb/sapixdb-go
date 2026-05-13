@@ -1,3 +1,17 @@
+<div align="center">
+  <img src="https://www.sapixdb.com/_next/image?url=%2Flogo.png&w=640&q=75" alt="SapixDB Logo" width="240">
+  <!--<h1>SapixDB</h1>--->
+  <p><strong>The first living database. Signed. Linked. Permanent.</strong></p>
+  <p>
+    <a href="https://www.sapixdb.com">Website</a> ·
+    <a href="https://www.sapixdb.com/docs">Documentation</a> ·
+    <a href="https://www.sapixdb.com/#use-cases">Use Cases</a>
+  </p>
+  <img src="https://img.shields.io/badge/golang-00ADD8?&style=plastic&logo=go&logoColor=white" alt="Go">
+  <!--/*<img src="https://img.shields.io/badge/python-3.10%2B-blue" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/node-18%2B-green" alt="Node 18+">*/--->
+</div>
+
 # SapixDB Go SDK
 
 Official Go client for [SapixDB](https://sapixdb.com) — the agent-native living database.
