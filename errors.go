@@ -35,3 +35,31 @@ type SapixNotFoundError struct {
 func (e *SapixNotFoundError) Error() string {
 	return fmt.Sprintf("sapixdb: record not found: %s", e.RecordID)
 }
+
+// SapixRateLimitError is returned when an API key exceeds its configured
+// requests-per-second limit (HTTP 429).
+//
+// Check for it by type-asserting the error returned by any SDK method:
+//
+//	_, err := orders.Write(ctx, data)
+//	var rle *sapixdb.SapixRateLimitError
+//	if errors.As(err, &rle) {
+//	    delay := time.Second
+//	    if rle.RPSLimit > 0 {
+//	        delay = time.Second / time.Duration(rle.RPSLimit)
+//	    }
+//	    time.Sleep(delay)
+//	    _, err = orders.Write(ctx, data) // retry once
+//	}
+type SapixRateLimitError struct {
+	Message string
+	// RPSLimit is the key's configured limit parsed from the server message, or 0 if not available.
+	RPSLimit int
+}
+
+func (e *SapixRateLimitError) Error() string {
+	if e.RPSLimit > 0 {
+		return fmt.Sprintf("sapixdb: rate limit exceeded (%d req/s): %s", e.RPSLimit, e.Message)
+	}
+	return fmt.Sprintf("sapixdb: rate limit exceeded: %s", e.Message)
+}
