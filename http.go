@@ -7,20 +7,22 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"time"
 )
 
+var rpsRe = regexp.MustCompile(`rate limit of (\d+) req/s`)
+
 type httpClient struct {
 	base    string
-	agent   string
 	headers map[string]string
 	client  *http.Client
 }
 
-func newHTTPClient(base, agent string, headers map[string]string, timeout time.Duration) *httpClient {
+func newHTTPClient(base string, headers map[string]string, timeout time.Duration) *httpClient {
 	return &httpClient{
 		base:    base,
-		agent:   agent,
 		headers: headers,
 		client:  &http.Client{Timeout: timeout},
 	}
@@ -60,18 +62,29 @@ func (c *httpClient) do(ctx context.Context, method, path string, body, out any)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errBody struct {
-			Error string `json:"error"`
-			Code  string `json:"code"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
+			Code    string `json:"code"`
 		}
 		_ = json.Unmarshal(respBody, &errBody)
-		msg := errBody.Error
+		msg := errBody.Message
+		if msg == "" {
+			msg = errBody.Error
+		}
 		if msg == "" {
 			msg = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		}
+		if resp.StatusCode == 429 {
+			rle := &SapixRateLimitError{Message: msg}
+			if m := rpsRe.FindStringSubmatch(msg); m != nil {
+				rle.RPSLimit, _ = strconv.Atoi(m[1])
+			}
+			return rle
 		}
 		return &SapixError{Message: msg, Status: resp.StatusCode, Code: errBody.Code}
 	}
 
-	if out != nil {
+	if out != nil && len(respBody) > 0 {
 		return json.Unmarshal(respBody, out)
 	}
 	return nil

@@ -1,94 +1,27 @@
 package sapixdb
 
-import (
-	"context"
-	"errors"
-)
+import "context"
 
-type queryBody struct {
-	Collection string         `json:"collection"`
-	Latest     bool           `json:"latest"`
-	AsOf       string         `json:"as_of,omitempty"`
-	Filter     map[string]any `json:"filter,omitempty"`
-	Limit      *int           `json:"limit,omitempty"`
-}
-
-type queryResult struct {
-	Results []NucleotideRecord `json:"results"`
-}
-
-// CollectionQuery is a time-scoped read-only view of a collection.
-type CollectionQuery struct {
-	http  *httpClient
-	agent string
-	name  string
-	asOf  string
-}
-
-func (q *CollectionQuery) query(ctx context.Context, latest bool, filter map[string]any, limit int) ([]NucleotideRecord, error) {
-	b := queryBody{Collection: q.name, Latest: latest, AsOf: q.asOf, Filter: filter}
-	if limit > 0 {
-		b.Limit = &limit
-	}
-	var out queryResult
-	if err := q.http.do(ctx, "POST", "/v1/"+q.agent+"/strand/query", b, &out); err != nil {
-		return nil, err
-	}
-	return out.Results, nil
-}
-
-// Latest returns the most recent version of every record as of the snapshot time.
-func (q *CollectionQuery) Latest(ctx context.Context, filter map[string]any) ([]NucleotideRecord, error) {
-	return q.query(ctx, true, filter, 0)
-}
-
-// All returns the full history as of the snapshot time.
-func (q *CollectionQuery) All(ctx context.Context, filter map[string]any) ([]NucleotideRecord, error) {
-	return q.query(ctx, false, filter, 0)
-}
-
-// Find filters records (latest version) as of the snapshot time.
-func (q *CollectionQuery) Find(ctx context.Context, filter map[string]any, limit int) ([]NucleotideRecord, error) {
-	return q.query(ctx, true, filter, limit)
-}
-
-// FindOne returns the first match or nil.
-func (q *CollectionQuery) FindOne(ctx context.Context, filter map[string]any) (*NucleotideRecord, error) {
-	results, err := q.query(ctx, true, filter, 1)
-	if err != nil {
-		return nil, err
-	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-	return &results[0], nil
-}
-
-// CollectionClient provides read/write access to a named collection.
+// CollectionClient provides read/write access to a named agent (collection).
+// In SapixDB, every collection IS an agent — the agent-as-table paradigm.
+// Operations route to /v1/agents/{name}/... endpoints.
 type CollectionClient struct {
-	http  *httpClient
-	agent string
-	name  string
+	http *httpClient
+	name string
 }
 
-// AsOf scopes all reads to a specific point in time. Returns a CollectionQuery.
-func (c *CollectionClient) AsOf(timestamp string) *CollectionQuery {
-	return &CollectionQuery{http: c.http, agent: c.agent, name: c.name, asOf: timestamp}
-}
-
-// Write appends a new record. Nothing is ever overwritten.
-func (c *CollectionClient) Write(ctx context.Context, data map[string]any) (*WriteResult, error) {
-	body := map[string]any{"collection": c.name, "data": data}
-	var out WriteResult
-	if err := c.http.do(ctx, "POST", "/v1/"+c.agent+"/strand/write", body, &out); err != nil {
+// Write appends a JSON record to the agent's strand. Nothing is ever overwritten.
+func (c *CollectionClient) Write(ctx context.Context, data map[string]any) (*WriteResponse, error) {
+	var out WriteResponse
+	if err := c.http.do(ctx, "POST", "/v1/agents/"+c.name+"/records/json", map[string]any{"data": data}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
 // WriteBatch appends multiple records sequentially.
-func (c *CollectionClient) WriteBatch(ctx context.Context, records []map[string]any) ([]*WriteResult, error) {
-	results := make([]*WriteResult, 0, len(records))
+func (c *CollectionClient) WriteBatch(ctx context.Context, records []map[string]any) ([]*WriteResponse, error) {
+	results := make([]*WriteResponse, 0, len(records))
 	for _, r := range records {
 		wr, err := c.Write(ctx, r)
 		if err != nil {
@@ -99,55 +32,52 @@ func (c *CollectionClient) WriteBatch(ctx context.Context, records []map[string]
 	return results, nil
 }
 
-// Get fetches a record by ID. Returns *SapixNotFoundError if the record does not exist.
-func (c *CollectionClient) Get(ctx context.Context, recordID string) (*NucleotideRecord, error) {
-	var out NucleotideRecord
-	err := c.http.do(ctx, "GET", "/v1/"+c.agent+"/strand/"+recordID, nil, &out)
-	if err != nil {
-		var sapixErr *SapixError
-		if errors.As(err, &sapixErr) && sapixErr.Status == 404 {
-			return nil, &SapixNotFoundError{RecordID: recordID}
-		}
+// Get fetches a record by content hash.
+func (c *CollectionClient) Get(ctx context.Context, contentHash string) (*RecordView, error) {
+	var out RecordView
+	if err := c.http.do(ctx, "GET", "/v1/agents/"+c.name+"/records/"+contentHash, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-func (c *CollectionClient) query(ctx context.Context, latest bool, filter map[string]any, limit int) ([]NucleotideRecord, error) {
-	b := queryBody{Collection: c.name, Latest: latest, Filter: filter}
-	if limit > 0 {
-		b.Limit = &limit
+// Latest returns the most recent N records from the agent.
+func (c *CollectionClient) Latest(ctx context.Context, limit int) (*QueryResult, error) {
+	if limit <= 0 {
+		limit = 20
 	}
-	var out queryResult
-	if err := c.http.do(ctx, "POST", "/v1/"+c.agent+"/strand/query", b, &out); err != nil {
+	return c.Query(ctx, map[string]any{"type": "latest", "limit": limit})
+}
+
+// Query executes a structured SaQL query against the agent.
+// body must have at least a "type" key, e.g.:
+//
+//	{"type": "latest", "limit": 10}
+//	{"type": "hash",   "content_hash": "e7f2..."}
+//	{"type": "time_range", "from_ts": ..., "to_ts": 18446744073709551615}
+//	{"type": "chain_head"}
+func (c *CollectionClient) Query(ctx context.Context, body map[string]any) (*QueryResult, error) {
+	var out QueryResult
+	if err := c.http.do(ctx, "POST", "/v1/agents/"+c.name+"/query", body, &out); err != nil {
 		return nil, err
 	}
-	return out.Results, nil
+	return &out, nil
 }
 
-// Latest returns the current (most recent) version of every record.
-func (c *CollectionClient) Latest(ctx context.Context, filter map[string]any) ([]NucleotideRecord, error) {
-	return c.query(ctx, true, filter, 0)
-}
-
-// History returns the full append-only history — every version ever written.
-func (c *CollectionClient) History(ctx context.Context, filter map[string]any) ([]NucleotideRecord, error) {
-	return c.query(ctx, false, filter, 0)
-}
-
-// Find filters records (latest version only).
-func (c *CollectionClient) Find(ctx context.Context, filter map[string]any, limit int) ([]NucleotideRecord, error) {
-	return c.query(ctx, true, filter, limit)
-}
-
-// FindOne returns the first matching record or nil.
-func (c *CollectionClient) FindOne(ctx context.Context, filter map[string]any) (*NucleotideRecord, error) {
-	results, err := c.query(ctx, true, filter, 1)
-	if err != nil {
+// Head returns the current chain head and record count for the agent.
+func (c *CollectionClient) Head(ctx context.Context) (*ChainHeadResponse, error) {
+	var out ChainHeadResponse
+	if err := c.http.do(ctx, "GET", "/v1/agents/"+c.name+"/strand/head", nil, &out); err != nil {
 		return nil, err
 	}
-	if len(results) == 0 {
-		return nil, nil
+	return &out, nil
+}
+
+// Status returns the agent status (record count + chain head).
+func (c *CollectionClient) Status(ctx context.Context) (*AgentStatusResponse, error) {
+	var out AgentStatusResponse
+	if err := c.http.do(ctx, "GET", "/v1/agents/"+c.name+"/status", nil, &out); err != nil {
+		return nil, err
 	}
-	return &results[0], nil
+	return &out, nil
 }
