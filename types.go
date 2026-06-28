@@ -53,6 +53,15 @@ type TraversalResult struct {
 	DepthReached  int             `json:"depth_reached"`
 }
 
+// BlobPutResponse is returned by PUT /v1/blobs.
+type BlobPutResponse struct {
+	ContentHash    string `json:"content_hash"`
+	SizeBytes      int64  `json:"size_bytes"`
+	Chunked        bool   `json:"chunked"`
+	Encrypted      bool   `json:"encrypted"`
+	StrandRecordID string `json:"strand_record_id"`
+}
+
 // HealthResponse is returned by GET /v1/health.
 type HealthResponse struct {
 	Status      string `json:"status"`

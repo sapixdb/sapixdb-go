@@ -152,6 +152,33 @@ func (c *Client) ListAgents(ctx context.Context) (*AgentListResponse, error) {
 	return &out, nil
 }
 
+// PutBlob uploads raw bytes to the blob store.
+// Returns a content-addressed BlobPutResponse with the hash needed to retrieve it.
+// Requires a key with write:blobs scope.
+//
+// Usage:
+//
+//	result, err := db.PutBlob(ctx, []byte("hello world"))
+//	if err != nil { ... }
+//	fmt.Println(result.ContentHash) // save to retrieve later
+func (c *Client) PutBlob(ctx context.Context, data []byte) (*BlobPutResponse, error) {
+	var out BlobPutResponse
+	if err := c.http.doBytes(ctx, "/v1/blobs", data, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetBlob downloads raw bytes from the blob store by content hash.
+// Requires a key with read:blobs scope.
+//
+// Usage:
+//
+//	data, err := db.GetBlob(ctx, result.ContentHash)
+func (c *Client) GetBlob(ctx context.Context, contentHash string) ([]byte, error) {
+	return c.http.getBytes(ctx, "/v1/blobs/"+contentHash)
+}
+
 // Ingest writes a JSON record to a named agent's strand.
 // Designed for AI agents, webhooks, and automated pipelines.
 // If agentID is empty, writes to the primary agent.
