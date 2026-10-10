@@ -26,6 +26,35 @@ type ChainHeadResponse struct {
 	RecordCount uint64 `json:"record_count"`
 }
 
+// SoftDeleteResponse is returned by CollectionClient.Delete.
+type SoftDeleteResponse struct {
+	Deleted           bool   `json:"deleted"`
+	OriginalHash      string `json:"original_hash"`
+	TombstoneRecordID string `json:"tombstone_record_id"`
+}
+
+// RestoreResponse is returned by CollectionClient.Restore. Restoring appends
+// the original payload as a brand-new record — NewContentHash/NewRecordID
+// are a fresh record, not the original one coming back.
+type RestoreResponse struct {
+	Restored       bool   `json:"restored"`
+	OriginalHash   string `json:"original_hash"`
+	NewContentHash string `json:"new_content_hash"`
+	NewRecordID    string `json:"new_record_id"`
+}
+
+// DeletedRecord is one entry returned by CollectionClient.ListDeleted.
+type DeletedRecord struct {
+	TombstoneRecordID string      `json:"tombstone_record_id"`
+	TombstoneTSMS     uint64      `json:"tombstone_ts_ms"`
+	OriginalHash      string      `json:"original_hash"`
+	OriginalRecord    *RecordView `json:"original_record"`
+}
+
+type deletedRecordsResponse struct {
+	Records []DeletedRecord `json:"records"`
+}
+
 // GraphEdge is a directed relationship between two agents.
 type GraphEdge struct {
 	Src          string  `json:"src"`
